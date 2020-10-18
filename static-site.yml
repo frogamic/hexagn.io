@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  DomainName:
+    Type: String
+  HostedZoneId:
+    Type: String
+
+Outputs:
+  ContentBucket:
+    Description: Domain Name of content bucket
+    Value: !Ref ContentBucket
+
+Resources:
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Origins:
+        - Id: S3Origin
+          DomainName: !GetAtt ContentBucket.DomainName
+          S3OriginConfig:
+            OriginAccessIdentity: !Join [ '', [ origin-access-identity/cloudfront/, !Ref ContentAccessId ] ]
+        Enabled: true
+        Comment: !Sub ${AWS::StackName}Distribution
+        DefaultRootObject: index.html
+        Logging:
+          IncludeCookies: false
+          Bucket: !GetAtt LogsBucket.DomainName
+          Prefix: !Ref AWS::StackName
+        Aliases:
+          - !Ref DomainName
+          - !Sub www.${DomainName}
+        DefaultCacheBehavior:
+          DefaultTTL: 3600
+          AllowedMethods:
+          - GET
+          - HEAD
+          - OPTIONS
+          TargetOriginId: S3Origin
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          ViewerProtocolPolicy: redirect-to-https
+        PriceClass: PriceClass_All
+        ViewerCertificate:
+          AcmCertificateArn: !Ref HttpsCert
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2018
+
+  ContentBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ContentBucket
+      PolicyDocument:
+        Statement:
+          - Action: s3:Get*
+            Effect: Allow
+            Resource: !Join [ "/", [ !GetAtt ContentBucket.Arn, '*' ] ]
+            Principal:
+              CanonicalUser: !GetAtt ContentAccessId.S3CanonicalUserId
+
+  ContentAccessId:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties: 
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub ${AWS::StackName}AccessId
+
+  ContentBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: BucketOwnerFullControl
+
+  LogsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: BucketOwnerFullControl
+
+  DnsRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      Comment: !Sub ${AWS::StackName}Records
+      HostedZoneName: !Sub ${DomainName}.
+      RecordSets:
+      - Type: A
+        Name: !Sub ${DomainName}.
+        AliasTarget:
+          DNSName: !GetAtt Distribution.DomainName
+          HostedZoneId: Z2FDTNDATAQYW2
+      - Type: A
+        Name: !Sub www.${DomainName}.
+        AliasTarget:
+          DNSName: !GetAtt Distribution.DomainName
+          HostedZoneId: Z2FDTNDATAQYW2
+
+  HttpsCert:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+      SubjectAlternativeNames:
+        - !Sub www.${DomainName}
+      DomainValidationOptions:
+        - DomainName: !Sub ${DomainName}
+          HostedZoneId: !Ref HostedZoneId
+        - DomainName: !Sub www.${DomainName}
+          HostedZoneId: !Ref HostedZoneId
